@@ -4,6 +4,7 @@ public class Persona {
 
     private String name;
     private String domain;
+    private String createdAt;
 
     public String getName() {
         return name;
@@ -19,5 +20,13 @@ public class Persona {
 
     public void setDomain(String domain) {
         this.domain = domain;
+    }
+
+    public String getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(String createdAt) {
+        this.createdAt = createdAt;
     }
 }
