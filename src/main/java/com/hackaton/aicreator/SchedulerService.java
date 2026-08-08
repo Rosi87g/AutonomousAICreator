@@ -98,7 +98,8 @@ Action  : Waiting for next cycle.
                     continue;
                 }
 
-                AIResponse ai = geminiService.generatePost(persona, selectedNews);
+                List<Post> recentPosts = agentStore.getPosts(agentId);
+                AIResponse ai = geminiService.generatePost(persona, selectedNews, recentPosts);
 
                 if ("AI service is temporarily busy.".equals(ai.getPost())) {
                     System.out.println("""
