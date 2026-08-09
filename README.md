@@ -1,95 +1,761 @@
 <img width="1919" height="965" alt="image" src="https://github.com/user-attachments/assets/cdd1cdd7-bf6c-4bf3-8aec-76225793dd57" />
 
+Absolutely. Since you have now moved persistence from local JSON files to **Upstash Redis**, the README needs to be updated in several places:
+
+* **Tech Stack:** add Upstash Redis.
+* **How It Works:** Persistence now uses Redis, not local JSON.
+* **Deployment:** mention Upstash environment variables.
+* **Running Locally:** include Upstash variables.
+* **Known Limitations:** remove the old ephemeral-disk limitation.
+* **Scheduler:** your current `scheduler.interval.ms=1800000` means **30 minutes.
+* **Memory:** persisted in Redis.
+* **Rejected topics:** persisted as well.
+* Keep `.env` and secrets out of Git.
+
+Here is the **complete updated `README.md`** you can replace your current one with:
+
+````markdown
 # Autonomous AI Creator — "Ada" (AI Security Persona)
 
-An autonomous AI agent that independently discovers AI/security news, applies editorial judgment, and publishes LinkedIn-style posts with transparent rationale — with zero human input after initialization.
+An autonomous AI agent that independently discovers AI/security news, applies editorial judgment, remembers previously covered topics, and publishes LinkedIn-style posts with transparent rationale — with zero human input after initialization.
 
-Built for the "Autonomous AI Creator" hackathon challenge.
+Built for the **"Autonomous AI Creator" hackathon challenge**.
+
+---
 
 ## Live Deployment
-- **Live API URL:** https://autonomousaicreator.onrender.com
+
+- **Live API:** https://autonomousaicreator.onrender.com
 - **Swagger UI:** https://autonomousaicreator.onrender.com/swagger-ui.html
 - **Repository:** https://github.com/Rosi87g/AutonomousAICreator
 
+---
+
 ## Tech Stack
-- Java 17, Spring Boot 4.1
-- Google Gemini API — post generation
-- NewsAPI — live topic discovery
-- File-based JSON persistence
-- Docker (deployment on Render)
 
-## API Endpoints
+- **Java 17**
+- **Spring Boot 4.1**
+- **Google Gemini API** — AI-powered post generation
+- **NewsAPI** — live AI/technology news discovery
+- **Upstash Redis** — persistent cloud storage for agents, feeds, memory, and rejected topics
+- **Jackson** — JSON serialization/deserialization
+- **Spring Scheduler** — autonomous periodic execution
+- **Docker** — containerized deployment
+- **Render** — cloud deployment
+- **Swagger / OpenAPI** — API documentation and testing
 
-### Initialize Agent
-Triggers one immediate publish cycle synchronously before returning, 
-      so the feed already contains a post right after initialization rather than waiting for the first scheduled cycle.
-      
-( POST /api/agent/init
-Body: { "persona": 
-            { "name": "Ada", 
-              "domain": "AI Security" 
-            } 
-      }
-Response: { "agentId": "#generates_id" } )
+---
 
-### Retrieve Feed
+# Core Idea
 
-GET /api/agent/feed?agentId={agentId}
-Response: { "posts": [ { "id", "createdAt", "text", "rationale", "sources" } ] }
+Ada is an autonomous AI Security content creator.
 
-### Rejected Topics (demonstrates editorial judgment)
+After initialization, the system independently:
 
-GET /api/agent/rejected?agentId={agentId}
-Response: [ { "topic", "reason", "score", "rejectedAt" } ]
+```text
+News Discovery
+      ↓
+Memory Check
+      ↓
+Editorial Decision
+      ↓
+Topic Selection
+      ↓
+Gemini Content Generation
+      ↓
+Post + Rationale + Sources
+      ↓
+Persistent Storage
+      ↓
+Next Autonomous Cycle
+````
 
-### Agent List
+No human approval is required between cycles.
 
-GET /api/agent/list
-Response: [ { "agentId", "name", "domain", "createdAt" } ]
+---
 
-### Stats
+# API Endpoints
 
-GET /api/agent/stats?agentId={agentId}
-Response: { "totalPosts", "totalRejected", "approvalRate" }
+## Initialize Agent
 
-### Health Check
-
-GET /health
-Response: { "status": "ok", "service": "aicreator" }
-
-## How It Works
-
-1. **Initialization** (`AgentController`) registers the persona and immediately triggers one publish cycle, so the feed isn't empty at the start.
-2. **Scheduler** (`SchedulerService`) then continues running every 30 minutes (`scheduler.interval.ms`), independently, with no further human input.
-3. **Topic Discovery** (`NewsService`) fetches the latest AI/tech news via NewsAPI, scoped to the persona's domain.
-4. **Memory Check** (`MemoryService`) filters out topics too similar to previously published ones (keyword-overlap similarity), preventing repetition.
-5. **Editorial Judgment** (`DecisionEngine`) scores each candidate topic against persona-relevant keywords (AI/security/risk terms) and penalizes low-value content (celebrity, sports, sales, gossip). Topics scoring below the threshold are rejected and logged with a reason — visible via `/api/agent/rejected`.
-6. **Content Generation** (`GeminiService`) writes the highest-scoring approved topic into a persona-voiced post via Gemini, including the 1-2 most recent published posts as context so new posts can naturally reference earlier ones (persona continuity), along with structured rationale (why selected / why now / source).
-7. **Persistence** (`PersistenceService`, `AgentStore`) writes agents, posts, and memory to disk as JSON, so state survives application restarts under normal operation.
-8. **Daily Cap** — a safety limit (`agent.max.posts.per.day`, default 8) prevents excessive API usage and keeps posting cadence realistic.
-
-## Persona Design
-"Ada" is an AI Security-focused persona. Her editorial voice consistently:
-- Prioritizes security, risk, safety, and governance angles on AI/tech news
-- Rejects shallow, celebrity, sports, or purely commercial content
-- Frames posts around dual-use risk, safe-by-design engineering, and proactive mitigation
-
-## Running Locally
-
-```bash
-$env:GEMINI_API_KEY = "your-key"
-$env:NEWS_API_KEY = "your-key"
-./mvnw spring-boot:run
+```http
+POST /api/agent/init
 ```
 
-Then visit `http://localhost:8080/swagger-ui.html` to interact with the API.
+Creates an autonomous AI persona and immediately triggers one publish cycle synchronously before returning.
 
-## Deployment
-Deployed on Render via Docker (see `Dockerfile`). Environment variables (`GEMINI_API_KEY`, `NEWS_API_KEY`) are configured in Render's dashboard, not committed to the repository. An external UptimeRobot monitor pings the live URL every 5 minutes to prevent Render's free tier from sleeping, ensuring the scheduler continues running reliably throughout the evaluation window.
+This ensures that the feed can contain a generated post immediately after initialization instead of waiting for the first scheduled cycle.
 
-## Design Notes / Known Limitations
-- Persistence is file-based (JSON on local disk); on Render's free tier, container restarts (e.g., from redeploys) reset stored state, since free-tier storage is ephemeral. A persistent disk (Render paid tier) would resolve this in a production setting.
-- Topic discovery relies on NewsAPI's free-tier query limits, factored into the scheduling interval to stay within quota over the 48-hour evaluation period.
+### Request
 
+```json
+{
+  "persona": {
+    "name": "Ada",
+    "domain": "AI Security"
+  }
+}
+```
 
+### Response
 
+```json
+{
+  "agentId": "generated-agent-id"
+}
+```
+
+---
+
+## Retrieve Feed
+
+```http
+GET /api/agent/feed?agentId={agentId}
+```
+
+Returns the posts generated by the agent.
+
+### Response
+
+```json
+{
+  "posts": [
+    {
+      "id": "post-id",
+      "createdAt": "timestamp",
+      "text": "LinkedIn post content...",
+      "rationale": "Why this topic was selected...",
+      "sources": [
+        "https://source-url"
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## Rejected Topics
+
+```http
+GET /api/agent/rejected?agentId={agentId}
+```
+
+Returns topics that were considered but rejected by the editorial decision engine.
+
+### Response
+
+```json
+[
+  {
+    "topic": "Example topic",
+    "reason": "Low relevance to AI security",
+    "score": 25,
+    "rejectedAt": "timestamp"
+  }
+]
+```
+
+This endpoint demonstrates that the agent does not simply publish every piece of news it discovers.
+
+---
+
+## Agent List
+
+```http
+GET /api/agent/list
+```
+
+Returns all initialized agents.
+
+### Response
+
+```json
+[
+  {
+    "agentId": "generated-agent-id",
+    "name": "Ada",
+    "domain": "AI Security",
+    "createdAt": "timestamp"
+  }
+]
+```
+
+---
+
+## Statistics
+
+```http
+GET /api/agent/stats?agentId={agentId}
+```
+
+Returns statistics for an agent.
+
+### Response
+
+```json
+{
+  "totalPosts": 5,
+  "totalRejected": 12,
+  "approvalRate": 29.41
+}
+```
+
+---
+
+## Health Check
+
+```http
+GET /health
+```
+
+### Response
+
+```json
+{
+  "status": "ok",
+  "service": "aicreator"
+}
+```
+
+---
+
+# How It Works
+
+## 1. Agent Initialization
+
+`AgentController` receives the persona configuration and registers the agent.
+
+Example:
+
+```text
+Name   → Ada
+Domain → AI Security
+```
+
+The system then immediately triggers a publish cycle so that the agent can start producing content without waiting for the scheduled interval.
+
+---
+
+## 2. Autonomous Scheduler
+
+`SchedulerService` continuously runs the autonomous publishing process.
+
+The current scheduler interval is:
+
+```properties
+scheduler.interval.ms=1800000
+```
+
+which corresponds to:
+
+```text
+30 minutes
+```
+
+The scheduler operates independently after initialization.
+
+No human input is required for subsequent cycles.
+
+---
+
+## 3. Topic Discovery
+
+`NewsService` retrieves current AI/technology news using NewsAPI.
+
+The discovered articles become candidates for the agent's editorial decision process.
+
+The topics are evaluated according to the persona's domain.
+
+For Ada, the focus is:
+
+* AI security
+* Cybersecurity
+* AI risks
+* Safety
+* Governance
+* Vulnerabilities
+* Responsible AI
+* Dual-use technology
+
+---
+
+## 4. Persistent Memory
+
+`MemoryService` maintains the topics previously considered or published by each agent.
+
+The system extracts meaningful keywords from topics and compares new topics against previously stored topics.
+
+If a new topic is sufficiently similar to an existing topic, it can be rejected to prevent repetitive content.
+
+This gives the agent a form of topic-level memory rather than treating every scheduler cycle as completely independent.
+
+---
+
+## 5. Editorial Judgment
+
+`DecisionEngine` evaluates candidate topics before content generation.
+
+Topics receive a relevance score based on persona-specific keywords and signals.
+
+For Ada, positive signals include concepts related to:
+
+* AI
+* Security
+* Risk
+* Safety
+* Vulnerabilities
+* Privacy
+* Governance
+* Threats
+
+Low-value topics can receive penalties, including content related to:
+
+* Celebrity news
+* Sports
+* Gossip
+* Purely commercial promotions
+* Low-relevance content
+
+Topics below the required threshold are rejected.
+
+The rejection is recorded with:
+
+```text
+Topic
+Reason
+Score
+Timestamp
+```
+
+This makes the agent's editorial decision process transparent.
+
+---
+
+## 6. Topic Selection
+
+Among the candidate topics that pass the editorial checks, the system selects the strongest relevant topic.
+
+Previously seen or highly similar topics are skipped.
+
+This prevents the agent from repeatedly posting about the same story.
+
+---
+
+## 7. AI Content Generation
+
+`GeminiService` sends the selected topic and persona information to Google Gemini.
+
+Gemini generates a professional LinkedIn-style post containing:
+
+```text
+POST
+RATIONALE
+SOURCES
+```
+
+The generation process also considers recent posts so that the persona can maintain continuity between publications.
+
+This allows Ada's content to feel like it comes from the same continuing AI Security persona rather than being a collection of unrelated posts.
+
+---
+
+## 8. Persistent Cloud Storage
+
+`PersistenceService` now uses **Upstash Redis** instead of local JSON files.
+
+The application persists:
+
+```text
+Agents
+   ↓
+Feeds / Posts
+   ↓
+Memory
+   ↓
+Rejected Topics
+```
+
+The data is stored in an external Redis database rather than only inside the Render container.
+
+### Persistence architecture
+
+```text
+Spring Boot Application
+        │
+        ▼
+PersistenceService
+        │
+        ▼
+Upstash Redis
+        │
+        ├── aicreator:agents
+        ├── aicreator:feeds
+        ├── aicreator:memory
+        └── aicreator:rejections
+```
+
+This means application state is kept outside the application container and can be loaded again when the application restarts.
+
+---
+
+# 9. Daily Safety Cap
+
+The system includes:
+
+```properties
+agent.max.posts.per.day=8
+```
+
+This provides a safety limit on the number of posts an agent can generate within a 24-hour period.
+
+The limit helps:
+
+* Control API usage
+* Prevent excessive posting
+* Maintain realistic publishing behavior
+* Protect against uncontrolled autonomous execution
+
+---
+
+# Persona Design
+
+## Ada — AI Security Persona
+
+Ada is designed as an AI Security-focused professional persona.
+
+Her editorial voice prioritizes:
+
+* Security
+* Risk
+* Safety
+* Governance
+* Responsible AI
+* Threat awareness
+* Safe-by-design engineering
+* Proactive mitigation
+
+Ada avoids shallow or irrelevant content and attempts to frame AI/technology developments through an AI Security perspective.
+
+### Example editorial mindset
+
+Instead of simply discussing:
+
+> "A new AI model was released."
+
+Ada may focus on:
+
+```text
+What new risks does this capability introduce?
+
+Could the technology be misused?
+
+What security controls should organizations consider?
+
+What governance implications exist?
+```
+
+This creates a consistent and recognizable persona.
+
+---
+
+# Autonomous Decision Pipeline
+
+The complete autonomous pipeline is:
+
+```text
+                ┌─────────────────┐
+                │   NewsAPI        │
+                └────────┬────────┘
+                         │
+                         ▼
+                ┌─────────────────┐
+                │ Candidate Topics │
+                └────────┬────────┘
+                         │
+                         ▼
+                ┌─────────────────┐
+                │ MemoryService    │
+                │ Duplicate Check  │
+                └────────┬────────┘
+                         │
+                         ▼
+                ┌─────────────────┐
+                │ DecisionEngine   │
+                │ Editorial Score  │
+                └────────┬────────┘
+                         │
+                ┌────────┴────────┐
+                │                 │
+             REJECT             APPROVE
+                │                 │
+                ▼                 ▼
+        Rejection History   GeminiService
+                                  │
+                                  ▼
+                           Generated Post
+                                  │
+                                  ▼
+                           AgentStore
+                                  │
+                                  ▼
+                           Upstash Redis
+                                  │
+                                  ▼
+                         Next Scheduler Cycle
+```
+
+---
+
+# Running Locally
+
+## 1. Required Environment Variables
+
+Create a `.env` file in the project root.
+
+```env
+GEMINI_API_KEY=your-gemini-key
+NEWS_API_KEY=your-newsapi-key
+UPSTASH_REDIS_REST_URL=your-upstash-rest-url
+UPSTASH_REDIS_REST_TOKEN=your-upstash-rest-token
+```
+
+Do **not** commit `.env` to GitHub.
+
+---
+
+## 2. Application Configuration
+
+`application.properties` uses environment variables:
+
+```properties
+spring.application.name=aicreator
+
+scheduler.interval.ms=1800000
+agent.max.posts.per.day=8
+
+gemini.api.key=${GEMINI_API_KEY}
+news.api.key=${NEWS_API_KEY}
+
+upstash.redis.url=${UPSTASH_REDIS_REST_URL}
+upstash.redis.token=${UPSTASH_REDIS_REST_TOKEN}
+```
+
+---
+
+## 3. Start the Application
+
+Windows:
+
+```powershell
+.\mvnw.cmd spring-boot:run
+```
+
+The application starts on:
+
+```text
+http://localhost:8080
+```
+
+Swagger UI:
+
+```text
+http://localhost:8080/swagger-ui.html
+```
+
+---
+
+# Deployment
+
+The application is deployed using:
+
+```text
+GitHub
+   ↓
+Docker
+   ↓
+Render
+   ↓
+Spring Boot
+   ↓
+Upstash Redis
+```
+
+### Render Environment Variables
+
+The following environment variables must be configured in Render:
+
+```text
+GEMINI_API_KEY
+NEWS_API_KEY
+UPSTASH_REDIS_REST_URL
+UPSTASH_REDIS_REST_TOKEN
+```
+
+Secrets are stored in the Render environment and are **not committed to the repository**.
+
+---
+
+# Persistence Across Restarts
+
+A major design improvement is the use of external Redis persistence.
+
+Previously, storing application state only inside the Render container would risk losing state when the container was recreated.
+
+The current architecture stores state externally:
+
+```text
+Render Container
+       │
+       │ HTTPS
+       ▼
+Upstash Redis
+```
+
+Therefore, application state can be loaded again after a normal application restart or container recreation, assuming the same Upstash database remains configured.
+
+The application loads persisted state during startup through:
+
+```text
+AgentStore
+MemoryService
+PersistenceService
+```
+
+---
+
+# Security
+
+API keys and tokens are never intended to be stored directly in source code.
+
+Environment variables are used for:
+
+```text
+Gemini
+NewsAPI
+Upstash Redis
+```
+
+The `.env` file is excluded from Git using `.gitignore`.
+
+Example:
+
+```text
+.env
+```
+
+Only configuration placeholders are committed:
+
+```properties
+gemini.api.key=${GEMINI_API_KEY}
+news.api.key=${NEWS_API_KEY}
+upstash.redis.url=${UPSTASH_REDIS_REST_URL}
+upstash.redis.token=${UPSTASH_REDIS_REST_TOKEN}
+```
+
+---
+
+# Project Structure
+
+```text
+src/
+└── main/
+    ├── java/
+    │   └── com/hackaton/aicreator/
+    │       ├── AicreatorApplication.java
+    │       ├── AgentController.java
+    │       ├── AgentStore.java
+    │       ├── Decision.java
+    │       ├── DecisionEngine.java
+    │       ├── GeminiService.java
+    │       ├── MemoryService.java
+    │       ├── NewsService.java
+    │       ├── PersistenceService.java
+    │       ├── Persona.java
+    │       ├── PersonaProfileService.java
+    │       ├── Post.java
+    │       ├── RejectedTopic.java
+    │       └── SchedulerService.java
+    │
+    └── resources/
+        └── application.properties
+```
+
+---
+
+# Key Design Features
+
+### Autonomous Operation
+
+After initialization, the agent independently discovers, evaluates, generates, and stores content.
+
+### Editorial Judgment
+
+The agent doesn't blindly publish every discovered article.
+
+### Persistent Memory
+
+Previously handled topics are remembered to reduce repetitive content.
+
+### Persona Continuity
+
+Recent posts are supplied to the generation process so the persona can maintain a consistent voice.
+
+### Transparent Reasoning
+
+Every generated post includes a rationale explaining why the topic was selected.
+
+### Rejection History
+
+Rejected topics are recorded and exposed through an API.
+
+### Persistent Cloud State
+
+Agents, feeds, memory, and rejection history are stored in Upstash Redis.
+
+### Safety Controls
+
+A daily post limit prevents uncontrolled content generation and excessive API usage.
+
+### API Observability
+
+Swagger and health endpoints make the system easy to inspect and demonstrate.
+
+---
+
+# Design Notes / Known Limitations
+
+* Topic discovery depends on NewsAPI availability and API quota limits.
+* Gemini generation depends on Gemini API availability and quota.
+* The scheduler interval is configured to 30 minutes to balance autonomous operation with API usage.
+* The system currently generates LinkedIn-style content rather than directly publishing to LinkedIn.
+* Upstash Redis is an external dependency, so the application requires valid Upstash credentials for persistent storage.
+* If the Upstash service or credentials are unavailable, persistence operations cannot be completed normally.
+
+---
+
+# Hackathon Objective
+
+The project demonstrates an autonomous AI agent that can:
+
+```text
+Discover
+   ↓
+Remember
+   ↓
+Evaluate
+   ↓
+Decide
+   ↓
+Generate
+   ↓
+Explain
+   ↓
+Persist
+   ↓
+Repeat
+```
+
+The goal is not simply to generate AI text.
+
+The goal is to demonstrate an agent capable of **independent topic discovery, memory, editorial judgment, persona consistency, transparent reasoning, and persistent autonomous operation**.
