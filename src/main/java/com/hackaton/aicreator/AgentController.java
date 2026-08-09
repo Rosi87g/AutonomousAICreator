@@ -21,6 +21,9 @@ public class AgentController {
     @Autowired
     private AgentStore agentStore;
 
+    @Autowired
+    private SchedulerService schedulerService;
+
     @PostMapping("/init")
     public InitResponse init(@RequestBody InitRequest request) {
 
@@ -39,6 +42,9 @@ public class AgentController {
         System.out.println("Agent initialized: " + agentId
                 + " | Persona: " + request.getPersona().getName()
                 + " | Domain: " + request.getPersona().getDomain());
+
+        // Generate an immediate first post so the feed isn't empty right after init
+        schedulerService.runCycleForAgent(agentId);
 
         return new InitResponse(agentId);
     }
