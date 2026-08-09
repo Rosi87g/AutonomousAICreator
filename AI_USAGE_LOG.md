@@ -1,63 +1,835 @@
+Yes. Your current `ai_log_usage` is outdated because it still describes **file-based JSON persistence** and the decision to avoid a database. You have now moved to **Upstash Redis persistent cloud storage**, so those sections need to reflect the actual final architecture.
+
+Also, the document should preserve the fact that **Claude was the primary development partner and ChatGPT was used for specific debugging/second opinions**.
+
+Here is the updated complete `ai_log_usage.md`:
+
+````markdown
 # AI Usage Log
 
-This document records how AI tools were used throughout the development of this project, including specific prompts, debugging sessions, and iterative decisions made during the hackathon.
+This document records how AI tools were used throughout the development of this project, including specific prompts, debugging sessions, architectural decisions, implementation iterations, and deployment troubleshooting during the hackathon.
+
+---
 
 ## Primary Tool
-**Claude (Anthropic)** — used as the primary pair-programming and architecture partner throughout the entire build, across a single continuous working session spanning problem analysis, implementation, debugging, deployment, and documentation.
 
-## Additional Tool: ChatGPT
-Used alongside Claude for a second opinion during specific debugging sessions, particularly around environment configuration and Git/GitHub issues:
+**Claude (Anthropic)** — used as the primary pair-programming and architecture partner throughout the build, across a continuous working session spanning problem analysis, implementation, debugging, persistence architecture, deployment, testing, and documentation.
 
-- **Silent startup hang after adding `.env` support:** the application would stop immediately after printing the Spring Boot startup banner, with no error or stack trace. Diagnosed by isolating the most recent change (the `spring-dotenv` dependency), removing it entirely, and temporarily using PowerShell `$env:GEMINI_API_KEY` / `$env:NEWS_API_KEY` session variables to confirm the underlying Spring Boot application itself was healthy. This isolated the issue to the dotenv library rather than application code.
-- **Dotenv library compatibility:** switched from `me.paulschwarz:spring-dotenv:4.0.0` to `me.paulschwarz:springboot4-dotenv:5.1.0` after suspecting a Spring Boot 4 compatibility issue with the original library version.
-- **Repeated GitHub push-protection rejections for a leaked API key:** GitHub's secret scanning blocked several push attempts even after using `git commit --amend --no-edit`, because the amend only captures whatever is currently staged — if `application.properties` still contained the real key at staging time, the amended commit still contained the secret. Resolved by:
-  - Verifying the actual working file content with `Get-Content .\src\main\resources\application.properties` before staging
-  - Searching git history directly for key fragments with `git grep -n "AQ\."` and `git grep -n "4403a3"` to confirm no leftover traces
-  - Confirming the final committed content directly with `git show HEAD:src/main/resources/application.properties`, checking it showed only the `${GEMINI_API_KEY}` / `${NEWS_API_KEY}` placeholders, not real values
-- **Considered a full repository reset** (`Remove-Item -Recurse -Force .git`, `git init`) at one point during the secret-cleanup process, then correctly determined this was unnecessary once the actual file content was fixed before committing — an amended commit on the existing history was sufficient.
-- **Clarified Maven project structure** — confirmed `src/test/java/.../AicreatorApplicationTests.java` (the default Spring Boot-generated test class) should be kept alongside `src/main`, not deleted, as it verifies the application context can start correctly.
+Claude was used for:
 
-This debugging process is also documented in full in the source chat transcript, available on request, showing the complete real-time troubleshooting sequence including terminal output at each step.
+- Problem statement analysis
+- Architecture planning
+- Project structure design
+- Java and Spring Boot implementation
+- API design
+- Autonomous-agent workflow design
+- Decision-engine logic
+- Memory design
+- Gemini integration
+- Scheduler implementation
+- Persistence architecture
+- Debugging and refactoring
+- Deployment planning
+- Documentation
 
-## Tools Used Within the Application Itself
-- **Google Gemini API** (`gemini-flash-latest`) — the content-generation engine that writes each persona post
-- **NewsAPI** — live topic discovery source
+---
 
-## Development Timeline & Key Decisions
+# Additional Tool: ChatGPT
 
-### 1. Problem Selection & Architecture Planning
-Reviewed three hackathon problem statements and discussed trade-offs (design-heavy vs. conversational-agent vs. autonomous-system problems) before selecting "Autonomous AI Creator," based on technical differentiation potential and timing alignment with the 48-hour evaluation window. Produced a PRD and folder structure for a Spring Boot implementation before writing any code.
+**ChatGPT** was used alongside Claude as a second opinion and debugging partner during specific implementation, environment, persistence, and Git/GitHub issues.
 
-### 2. Environment Setup
-Debugged local environment issues step-by-step, including:
-- `mvnw.cmd` not found (wrong working directory)
-- `JAVA_HOME` not set correctly, requiring locating a bundled JDK and setting the environment variable
-- Git not installed / not on PATH after installation, requiring manual PATH configuration
+## Environment Configuration Debugging
 
-### 3. Core API Implementation
-Built `POST /api/agent/init` and `GET /api/agent/feed` incrementally — starting with hardcoded fake responses, then wiring in a real `AgentStore`, then real file-based persistence — verified at each step via PowerShell (`Invoke-RestMethod`) and later Swagger UI.
+### Silent startup hang after adding `.env` support
 
-### 4. Editorial Judgment Bug — real debugging example
-Initial `DecisionEngine` scoring logic rejected nearly all topics, including a highly relevant AI biosafety story ("AI used to design brand new viruses..."), because the keyword-matching threshold (60) was too strict relative to keyword coverage. Diagnosed by reading actual rejection logs, then rewrote `DecisionEngine.java` with broader keyword coverage and a recalibrated threshold (35). Verified the fix by re-running the same news batch and confirming the biosafety story now scored 95 and was correctly approved.
+The application initially stopped shortly after printing the Spring Boot startup banner, without producing a useful error or stack trace.
 
-### 5. Persistence & Deployment Constraints — real debugging example
-Implemented `PersistenceService` to persist agents/feeds/memory to JSON files, verified survival across local restarts. Discovered Render's free-tier containers use ephemeral storage, meaning persisted data resets on every redeploy — diagnosed via Render deploy logs showing `Loaded 0 agent(s) from disk.` after each redeploy. Decided against a full database migration under time constraints, and instead adopted an operational discipline: finalize all code changes before the last redeploy, then stop pushing entirely so the container doesn't restart during the evaluation window.
+The debugging process involved:
 
-### 6. Deployment Debugging
-- Worked through Render's "Node" auto-detection incorrectly matching the repo (no Java runtime option available on Render), resolved by containerizing the app with a custom `Dockerfile` and selecting "Docker" as the environment.
-- Fixed a `PlaceholderResolutionException` for `${GEMINI_API_KEY}` when running locally without the corresponding environment variable set — resolved via `$env:GEMINI_API_KEY` in the local terminal session, keeping real secrets out of any committed file.
-- Fixed a GitHub push protection block after a real API key was accidentally hardcoded into `application.properties` during a testing shortcut; reverted to the `${GEMINI_API_KEY}` placeholder pattern and rotated the exposed key.
+- Isolating the most recently introduced change
+- Investigating the `spring-dotenv` dependency
+- Removing the problematic configuration
+- Temporarily using PowerShell environment variables such as:
 
-### 7. Reliability Enhancements
-- Identified that Render's free tier sleeps after ~15 minutes of inactivity, which could prevent the `@Scheduled` publishing job from firing reliably; set up an external UptimeRobot monitor pinging the live URL every 5 minutes to keep the service awake for the full evaluation window.
-- Added a daily post cap (`agent.max.posts.per.day`) after noticing accumulated local test posts could otherwise cause runaway API usage.
+```powershell
+$env:GEMINI_API_KEY="..."
+$env:NEWS_API_KEY="..."
+````
 
-### 8. Feature Enhancements (post-MVP)
-- Added `/api/agent/rejected` to expose editorial rejection reasoning, `/api/agent/list` and `/api/agent/stats` for visibility, and `/health` for basic liveness checking.
-- Added persona continuity: `GeminiService` now receives the 1-2 most recent published posts as context, allowing (but not forcing) natural callbacks between posts.
-- Refactored the post-generation logic out of `SchedulerService` into a shared `runCycleForAgent()` method so `POST /api/agent/init` can trigger one immediate post generation synchronously, ensuring the feed is never empty immediately after initialization.
-- Adjusted the scheduler interval (1 hour → 30 minutes) for more consistent feed activity, after weighing NewsAPI's 100 requests/day free-tier limit against posting frequency.
-- Added input validation on `/init` and creation timestamps on agents.
+This confirmed that the underlying Spring Boot application was healthy and isolated the issue to environment-variable loading rather than the application's business logic.
 
-## Summary
-This project was built through continuous, iterative collaboration with Claude and ChatGPT — including genuine mistakes, debugging sessions, and course corrections, not a single generated dump. All code was reviewed, compiled (`mvn compile`), and functionally tested — locally first, then on the live Render deployment — before being committed. Git history reflects incremental development across the build process.
+### Dotenv compatibility
+
+The project initially used:
+
+```text
+me.paulschwarz:spring-dotenv
+```
+
+The configuration was later changed to the Spring Boot 4-compatible dotenv dependency:
+
+```text
+me.paulschwarz:springboot4-dotenv
+```
+
+This was done after investigating compatibility behavior with Spring Boot 4.
+
+---
+
+# Git and GitHub Debugging
+
+## GitHub Push Protection
+
+GitHub secret scanning repeatedly blocked pushes after an API key had accidentally existed in `application.properties`.
+
+GitHub reported a repository rule violation because a real GCP/Gemini API key existed in the commit history.
+
+The debugging process included:
+
+* Inspecting the working file directly
+* Removing hardcoded API keys
+* Replacing secrets with environment-variable placeholders
+* Checking Git history for leftover key fragments
+* Using commands such as:
+
+```powershell
+Get-Content .\src\main\resources\application.properties
+```
+
+and:
+
+```powershell
+git grep -n "AQ\."
+git grep -n "4403a3"
+```
+
+The final committed configuration used placeholders:
+
+```properties
+gemini.api.key=${GEMINI_API_KEY}
+news.api.key=${NEWS_API_KEY}
+```
+
+and the real values were kept outside Git.
+
+The exposed API key was also rotated.
+
+---
+
+## Git Repository Reset Discussion
+
+A complete Git repository reset was considered during the secret-cleanup process:
+
+```powershell
+Remove-Item -Recurse -Force .git
+git init
+```
+
+However, the process was later understood more clearly: resetting the repository was not inherently required once the working tree and commits were correctly cleaned.
+
+The final repository was configured so that secrets and environment-specific files were excluded from version control.
+
+---
+
+## Git Branch Synchronization
+
+The local and GitHub branches diverged during development because changes were made both locally and remotely.
+
+The issue was diagnosed using:
+
+```powershell
+git status
+git log --oneline -5
+git fetch origin
+```
+
+The branches were then synchronized while preserving the required project changes.
+
+---
+
+# Maven and Java Environment Debugging
+
+The project initially encountered a `JAVA_HOME` configuration problem when Maven was executed.
+
+The issue was identified from:
+
+```text
+The JAVA_HOME environment variable is not defined correctly
+```
+
+The local Java/Maven environment was then corrected and the project was successfully compiled using:
+
+```powershell
+.\mvnw.cmd clean compile
+```
+
+The project ultimately compiled successfully using the Java version configured by the Maven build.
+
+---
+
+# AI Tools Used Within the Application
+
+The application itself uses AI and external data services as part of its autonomous workflow.
+
+## Google Gemini API
+
+Google Gemini is the content-generation engine.
+
+The application uses the Gemini model:
+
+```text
+gemini-flash-latest
+```
+
+Gemini receives:
+
+* Persona name
+* Persona domain
+* Selected news topic
+* Source URL
+* Recent persona context
+
+and generates:
+
+* LinkedIn-style post
+* Rationale
+* Sources
+
+---
+
+## NewsAPI
+
+NewsAPI is used as the live topic-discovery source.
+
+The application periodically retrieves current AI/technology news and passes candidate topics through its memory and editorial decision pipeline.
+
+---
+
+# Development Timeline & Key Decisions
+
+## 1. Problem Selection & Architecture Planning
+
+Reviewed the available hackathon problem statements and discussed trade-offs between different project directions.
+
+The **Autonomous AI Creator** challenge was selected because it provided strong opportunities to demonstrate:
+
+* Autonomous behavior
+* AI-generated content
+* Decision making
+* Memory
+* Scheduling
+* Persona consistency
+* Explainability
+* Persistent state
+
+A Spring Boot architecture was selected for the backend.
+
+---
+
+# 2. Environment Setup
+
+The development environment was configured incrementally.
+
+Issues addressed included:
+
+* Maven wrapper execution from the correct project directory
+* `JAVA_HOME` configuration
+* Java version compatibility
+* Git installation and PATH configuration
+* Environment-variable management
+* Local API key configuration
+
+Real API credentials were intentionally moved out of source code.
+
+---
+
+# 3. Core API Implementation
+
+The first application functionality was implemented incrementally.
+
+The initial API focused on:
+
+```text
+POST /api/agent/init
+GET  /api/agent/feed
+```
+
+Development progressed from:
+
+```text
+Hardcoded response
+      ↓
+AgentStore
+      ↓
+Real persona registration
+      ↓
+News discovery
+      ↓
+AI generation
+      ↓
+Persistence
+```
+
+Each stage was compiled and tested before additional functionality was added.
+
+Testing was performed through PowerShell requests and later through Swagger UI.
+
+---
+
+# 4. Editorial Judgment Bug
+
+One of the important debugging sessions involved the `DecisionEngine`.
+
+The initial scoring logic rejected too many topics, including a highly relevant AI biosafety story involving AI-assisted virus design.
+
+The issue was traced to an overly strict scoring threshold and insufficient keyword coverage.
+
+The decision engine was then recalibrated with:
+
+* Broader relevant keyword coverage
+* Better AI/security/risk signals
+* A lower approval threshold
+
+After the change, the biosafety story scored approximately:
+
+```text
+95
+```
+
+and was correctly approved.
+
+This demonstrated that the agent was making an actual editorial decision rather than simply publishing the first discovered article.
+
+---
+
+# 5. Autonomous Memory
+
+`MemoryService` was introduced to prevent the agent from repeatedly publishing substantially similar topics.
+
+The memory system:
+
+1. Extracts meaningful keywords from a topic.
+2. Removes common stop words.
+3. Stores topic keyword sets per agent.
+4. Compares new topics against previously stored topics.
+5. Uses keyword similarity to determine whether a topic is sufficiently similar to previous coverage.
+
+The goal was to give the autonomous agent continuity between publishing cycles.
+
+---
+
+# 6. Persona Continuity
+
+The Gemini generation process was enhanced to include recent published posts as context.
+
+The most recent posts can be supplied to Gemini so that the generated content can naturally reference earlier discussion when appropriate.
+
+This helps maintain:
+
+* Consistent voice
+* Topic continuity
+* Persona identity
+* Narrative progression
+
+rather than treating every generated post as an isolated piece of content.
+
+---
+
+# 7. Immediate Initialization Publishing
+
+Originally, the scheduler was responsible for waiting until its next scheduled cycle before generating content.
+
+This could leave a newly initialized agent with an empty feed.
+
+The architecture was refactored so that initialization can trigger an immediate publishing cycle synchronously.
+
+Therefore:
+
+```text
+POST /api/agent/init
+        ↓
+Agent created
+        ↓
+Immediate publish cycle
+        ↓
+Feed contains generated content
+```
+
+The scheduler then continues autonomous execution afterward.
+
+---
+
+# 8. Rejected Topic Visibility
+
+The system was expanded with a rejected-topic endpoint:
+
+```text
+GET /api/agent/rejected
+```
+
+Rejected topics record:
+
+* Topic
+* Reason
+* Score
+* Rejection timestamp
+
+This was added to make the agent's editorial judgment observable rather than hidden inside the backend.
+
+---
+
+# 9. Agent Visibility & Statistics
+
+Additional endpoints were added:
+
+```text
+GET /api/agent/list
+GET /api/agent/stats
+GET /health
+```
+
+These provide:
+
+* Agent visibility
+* Post counts
+* Rejection counts
+* Approval rate
+* Application health status
+
+This improved the ability to demonstrate the autonomous system during evaluation.
+
+---
+
+# 10. Scheduler Interval
+
+The scheduler interval was adjusted during development based on the desired autonomous activity and external API limits.
+
+The final scheduler configuration is:
+
+```properties
+scheduler.interval.ms=1800000
+```
+
+which represents:
+
+```text
+30 minutes
+```
+
+The interval was selected to provide regular autonomous activity while remaining mindful of NewsAPI usage limits.
+
+---
+
+# 11. Daily Posting Safety Cap
+
+A daily posting limit was added:
+
+```properties
+agent.max.posts.per.day=8
+```
+
+This protects against excessive autonomous posting and unnecessary API usage.
+
+The cap also helps keep the agent's behavior realistic for a LinkedIn-style content creator.
+
+---
+
+# 12. Initial File-Based Persistence
+
+The first persistence implementation used local JSON files.
+
+The system initially stored:
+
+```text
+agents.json
+feeds.json
+memory.json
+```
+
+This allowed local testing of restart persistence.
+
+The implementation was useful during early development because it required minimal infrastructure and allowed the agent state to survive ordinary local application restarts.
+
+---
+
+# 13. Render Persistence Limitation
+
+During deployment, an important limitation was discovered.
+
+Render's deployment environment uses ephemeral container storage for the relevant deployment configuration.
+
+Therefore, local JSON files stored inside the application container could be lost when the container was recreated or redeployed.
+
+This was identified through deployment behavior where the application reported:
+
+```text
+Loaded 0 agent(s) from disk.
+```
+
+after a fresh container instance.
+
+This demonstrated that local file persistence was not sufficient for reliable cloud persistence.
+
+---
+
+# 14. Migration to Upstash Redis
+
+Instead of relying on local container storage, the persistence architecture was upgraded to **Upstash Redis**.
+
+The final architecture became:
+
+```text
+Spring Boot
+     ↓
+PersistenceService
+     ↓
+Upstash Redis
+```
+
+This separates application state from the Render container.
+
+The following data is now stored externally:
+
+```text
+Agents
+Feeds / Posts
+Memory
+Rejected Topics
+```
+
+Redis keys are organized using application-specific names such as:
+
+```text
+aicreator:agents
+aicreator:feeds
+aicreator:memory
+aicreator:rejections
+```
+
+---
+
+# 15. PersistenceService Refactor
+
+`PersistenceService.java` was rewritten so that it no longer depends on local JSON files for primary persistence.
+
+The service now:
+
+* Serializes application objects using Jackson
+* Sends data to Upstash Redis through its REST API
+* Retrieves persisted JSON from Redis
+* Deserializes the data back into Java objects
+
+This allows the existing application data structures to remain mostly unchanged while replacing the persistence layer underneath them.
+
+---
+
+# 16. AgentStore Persistence Upgrade
+
+`AgentStore.java` was updated to use the new persistence service.
+
+It now persists:
+
+```text
+Agents
+Feeds
+Rejected topics
+```
+
+On application startup, it loads these structures from persistent cloud storage.
+
+The store also avoids unnecessarily replacing an existing feed when an already-known agent is registered again.
+
+---
+
+# 17. MemoryService Persistence Upgrade
+
+`MemoryService.java` was connected to the new persistent storage layer.
+
+On startup:
+
+```text
+Upstash Redis
+      ↓
+PersistenceService
+      ↓
+MemoryService
+```
+
+Previously stored topic memory is loaded.
+
+When a new topic is remembered, the updated memory is saved back to Redis.
+
+This allows topic memory to survive application restarts and container recreation.
+
+---
+
+# 18. Environment Variable Configuration
+
+The final application does not store API keys directly in source code.
+
+The configuration uses:
+
+```properties
+gemini.api.key=${GEMINI_API_KEY}
+news.api.key=${NEWS_API_KEY}
+
+upstash.redis.url=${UPSTASH_REDIS_REST_URL}
+upstash.redis.token=${UPSTASH_REDIS_REST_TOKEN}
+```
+
+The actual values are provided through environment configuration.
+
+### Local Development
+
+Local environment variables are supplied through the developer environment / `.env` configuration.
+
+### Render Deployment
+
+Render environment variables contain:
+
+```text
+GEMINI_API_KEY
+NEWS_API_KEY
+UPSTASH_REDIS_REST_URL
+UPSTASH_REDIS_REST_TOKEN
+```
+
+No real credentials are intended to be committed to GitHub.
+
+---
+
+# 19. Upstash Connection Debugging
+
+After migrating to Redis, the application initially failed with:
+
+```text
+Could not resolve placeholder 'upstash.redis.url'
+```
+
+The issue was diagnosed as an environment-variable loading problem rather than a Redis implementation problem.
+
+The expected mapping was verified:
+
+```text
+UPSTASH_REDIS_REST_URL
+        ↓
+upstash.redis.url
+
+UPSTASH_REDIS_REST_TOKEN
+        ↓
+upstash.redis.token
+```
+
+PowerShell environment variables were temporarily used to validate the local configuration.
+
+After the environment variables were correctly supplied, the application successfully progressed through Redis initialization.
+
+---
+
+# 20. Gemini Environment Debugging After Redis Integration
+
+Once Upstash configuration was resolved, the application progressed further but encountered:
+
+```text
+Could not resolve placeholder 'GEMINI_API_KEY'
+```
+
+This confirmed that the Redis persistence layer had passed initialization and that the remaining problem was another missing local environment variable.
+
+The Gemini key was supplied through the local environment rather than hardcoded into `application.properties`.
+
+This reinforced the separation between:
+
+```text
+Application Configuration
+        ↓
+Environment Variables
+        ↓
+External Services
+```
+
+---
+
+# 21. Deployment Reliability
+
+Render's free tier can sleep when the service is inactive.
+
+An external uptime monitor was configured to periodically ping the deployed service so that the application remains active during the evaluation period.
+
+This is particularly relevant because the project contains a scheduled autonomous process.
+
+The scheduler therefore has an opportunity to continue executing instead of remaining inactive due to platform sleep behavior.
+
+---
+
+# 22. Final Persistence Architecture
+
+The final persistence architecture is:
+
+```text
+                 ┌──────────────────────┐
+                 │      Render          │
+                 │  Spring Boot App     │
+                 └──────────┬───────────┘
+                            │
+                 PersistenceService
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │    Upstash Redis     │
+                 │                      │
+                 │  agents              │
+                 │  feeds               │
+                 │  memory              │
+                 │  rejections          │
+                 └──────────────────────┘
+```
+
+This replaces the earlier:
+
+```text
+Spring Boot
+     ↓
+Local JSON files
+     ↓
+Render container disk
+```
+
+architecture.
+
+---
+
+# 23. Final Autonomous Pipeline
+
+The final system operates approximately as follows:
+
+```text
+Agent Initialization
+        ↓
+Immediate Publish Cycle
+        ↓
+NewsAPI
+        ↓
+Candidate Topics
+        ↓
+MemoryService
+        ↓
+Duplicate / Similarity Check
+        ↓
+DecisionEngine
+        ↓
+Editorial Score
+        ↓
+ ┌───────────────┐
+ │               │
+ ▼               ▼
+REJECT         APPROVE
+ │               │
+ ▼               ▼
+Rejected       Gemini
+History          │
+                 ▼
+            Generated Post
+                 │
+                 ▼
+             AgentStore
+                 │
+                 ▼
+           Upstash Redis
+                 │
+                 ▼
+          Next 30-min Cycle
+```
+
+---
+
+# 24. Testing & Verification
+
+The application was repeatedly tested during development through:
+
+* Maven compilation
+* Spring Boot startup
+* PowerShell API requests
+* Swagger UI
+* Local environment configuration
+* Render deployment
+* Live API health checks
+* Persistence initialization
+* Git/GitHub validation
+
+Compilation was repeatedly verified using:
+
+```powershell
+.\mvnw.cmd clean compile
+```
+
+Successful builds produced:
+
+```text
+BUILD SUCCESS
+```
+
+---
+
+# Summary
+
+This project was developed through continuous, iterative collaboration with Claude and ChatGPT rather than through a single generated code dump.
+
+AI assistance was used for:
+
+* Architecture
+* Implementation
+* Debugging
+* Refactoring
+* Environment configuration
+* Persistence design
+* Deployment troubleshooting
+* Documentation
+
+The development process included genuine implementation mistakes, debugging sessions, architectural changes, and verification.
+
+A significant architectural evolution occurred during the project:
+
+```text
+Initial
+Local JSON Persistence
+        ↓
+Deployment Limitation Discovered
+        ↓
+Upstash Redis Migration
+        ↓
+External Persistent Cloud Storage
+```
+
+The final application demonstrates an autonomous AI creator capable of:
+
+```text
+Discover
+   ↓
+Remember
+   ↓
+Evaluate
+   ↓
+Decide
+   ↓
+Generate
+   ↓
+Explain
+   ↓
+Persist
+   ↓
+Repeat
+```
+
+with:
+
+* Autonomous scheduling
+* AI-generated content
+* Persona continuity
+* Topic memory
+* Editorial judgment
+* Rejection reasoning
+* Persistent cloud storage
+* API observability
+* Safety limits
+* Externalized secrets
