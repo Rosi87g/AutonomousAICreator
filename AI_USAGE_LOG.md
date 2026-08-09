@@ -1,7 +1,3 @@
-Yes. Your current `ai_log_usage` is outdated because it still describes **file-based JSON persistence** and the decision to avoid a database. You have now moved to **Upstash Redis persistent cloud storage**, so those sections need to reflect the actual final architecture.
-
-Also, the document should preserve the fact that **Claude was the primary development partner and ChatGPT was used for specific debugging/second opinions**.
-
 Here is the updated complete `ai_log_usage.md`:
 
 ````markdown
